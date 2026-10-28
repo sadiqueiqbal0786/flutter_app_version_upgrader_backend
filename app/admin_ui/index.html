@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Version Manager</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --muted:#5b6470; --line:#dfe3e8; --accent:#3b5bdb; --danger:#c92a2a; --ok:#2b8a3e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111418; --card:#1b2026; --ink:#e8ebef; --muted:#9aa4b0; --line:#2c343d; --accent:#748ffc; } }
+  * { box-sizing:border-box } body { margin:0; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--ink) }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap }
+  header h1 { font-size:16px; margin:0 auto 0 0 }
+  main { display:grid; grid-template-columns: 260px 1fr; gap:16px; padding:16px; max-width:1200px; margin:0 auto }
+  @media (max-width:800px){ main { grid-template-columns:1fr } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 10px }
+  input, select, textarea, button { font:inherit; color:inherit; background:transparent; border:1px solid var(--line); border-radius:6px; padding:6px 8px }
+  input:focus, select:focus, textarea:focus { outline:2px solid var(--accent); outline-offset:1px }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); cursor:pointer }
+  button { cursor:pointer } button:disabled { opacity:.5; cursor:default }
+  label { display:block; font-size:12px; color:var(--muted); margin:8px 0 2px }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center }
+  .apps button { display:block; width:100%; text-align:left; margin:4px 0; border:1px solid transparent }
+  .apps button.active { border-color:var(--accent) }
+  table { width:100%; border-collapse:collapse; font-size:13px } th, td { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line) }
+  .badge { display:inline-block; padding:1px 7px; border-radius:999px; font-size:12px; border:1px solid var(--line) }
+  .badge.published { color:var(--ok); border-color:var(--ok) } .badge.withdrawn { color:var(--muted) } .badge.rollout { color:var(--accent); border-color:var(--accent) }
+  .stat { font-size:22px; font-weight:600 } .muted { color:var(--muted) } .err { color:var(--danger) }
+  #toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:8px 14px; border-radius:6px; display:none }
+  pre { background:var(--bg); padding:10px; border-radius:6px; overflow:auto; font-size:12px }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px } @media (max-width:600px){ .grid2 { grid-template-columns:1fr } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Version Manager</h1>
+  <input id="key" type="password" placeholder="Admin API key" size="28">
+  <button id="connect" class="primary">Connect</button>
+  <span id="health" class="muted"></span>
+</header>
+<main>
+  <aside class="card">
+    <h2>Applications</h2>
+    <div id="apps" class="apps"></div>
+    <details style="margin-top:10px">
+      <summary>Add application</summary>
+      <label>App id (what the plugin sends)</label><input id="n_app_id" placeholder="com.example.app">
+      <label>Name</label><input id="n_name" placeholder="My App">
+      <label>Android package name</label><input id="n_android" placeholder="com.example.app">
+      <label>iOS bundle id</label><input id="n_bundle" placeholder="com.example.app">
+      <label>Apple app id (numeric)</label><input id="n_apple" placeholder="123456789">
+      <div class="row" style="margin-top:8px"><button id="n_create" class="primary">Create</button></div>
+    </details>
+  </aside>
+
+  <section id="detail" style="display:none">
+    <div class="card">
+      <div class="row">
+        <strong id="d_name"></strong><span id="d_appid" class="muted"></span>
+        <span style="margin-left:auto"></span>
+        <select id="platform"><option value="android">Android</option><option value="ios">iOS</option></select>
+        <select id="channel"><option>production</option><option>beta</option><option>alpha</option><option>internal</option></select>
+        <button id="sync">Sync from store</button>
+        <button id="refresh">Refresh</button>
+      </div>
+      <div id="d_sync" class="muted" style="margin-top:6px"></div>
+    </div>
+
+    <div class="grid2" style="margin-top:16px">
+      <div class="card">
+        <h2>Latest published</h2>
+        <div class="stat" id="p_latest">–</div>
+        <div class="muted">Minimum now: <span id="p_minimum">–</span></div>
+        <div class="muted">Recommended: <span id="p_recommended">–</span></div>
+        <div class="muted" id="p_error"></div>
+      </div>
+      <div class="card">
+        <h2>Minimum policy</h2>
+        <label><input type="checkbox" id="f_enabled"> Enforcement enabled</label>
+        <label>Mode</label>
+        <div class="row">
+          <label><input type="radio" name="mode" value="auto_latest"> Latest</label>
+          <label><input type="radio" name="mode" value="custom"> Custom</label>
+          <label><input type="radio" name="mode" value="age_based"> Age based</label>
+        </div>
+        <div id="f_custom_box"><label>Custom minimum version / build</label>
+          <div class="row"><input id="f_custom_version" placeholder="2.5.0" size="10"><input id="f_custom_build" placeholder="250" size="6"></div></div>
+        <div id="f_age_box"><label>Max release age (days)</label><input id="f_age" type="number" min="1" placeholder="90" size="6"></div>
+        <label><input type="checkbox" id="f_force"> Force update below minimum</label>
+        <label>Update message</label><textarea id="f_message" rows="2" style="width:100%"></textarea>
+        <label>Update URL override</label><input id="f_url" style="width:100%" placeholder="leave empty to use the store page">
+        <label>Recommended version / build (optional)</label>
+        <div class="row"><input id="f_rec_version" placeholder="2.7.0" size="10"><input id="f_rec_build" placeholder="270" size="6"></div>
+        <div class="row" style="margin-top:12px"><button id="save" class="primary">Save policy</button><button id="reset">Reset to default</button><span id="f_status" class="muted"></span></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2>Releases</h2>
+      <table><thead><tr><th>Version</th><th>Build</th><th>Status</th><th>Source</th><th>Published</th><th></th></tr></thead><tbody id="releases"></tbody></table>
+      <details style="margin-top:10px"><summary>Add release manually</summary>
+        <div class="row" style="margin-top:6px">
+          <input id="r_version" placeholder="2.7.0" size="10"><input id="r_build" placeholder="270" size="6">
+          <input id="r_notes" placeholder="release notes" size="30"><button id="r_add" class="primary">Add</button>
+        </div></details>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2>Installed versions (reported by checks)</h2>
+      <table><thead><tr><th>Version</th><th>Build</th><th>Checks</th><th>Status</th><th>Last seen</th></tr></thead><tbody id="installs"></tbody></table>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2>Client preview (what the plugin receives)</h2>
+      <pre id="preview">–</pre>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+const $ = s => document.querySelector(s);
+const state = { key: localStorage.getItem('vm_admin_key') || '', apps: [], app: null };
+$('#key').value = state.key;
+
+function toast(msg, isErr) { const t=$('#toast'); t.textContent=msg; t.style.color = isErr ? '#ff8787' : ''; t.style.display='block'; setTimeout(()=>t.style.display='none', 3000); }
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: { 'X-Admin-Key': state.key, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 204) return null;
+  const data = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(data.detail ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : r.statusText);
+  return data;
+}
+const sel = () => ({ p: $('#platform').value, c: $('#channel').value });
+const fmt = d => d ? new Date(d).toLocaleString() : '';
+
+async function connect() {
+  state.key = $('#key').value.trim(); localStorage.setItem('vm_admin_key', state.key);
+  try {
+    const h = await fetch('/health').then(r=>r.json());
+    $('#health').textContent = `db ${h.database?'ok':'down'} · cache ${h.cache} · play ${h.google_play?'on':'off'} · asc ${h.app_store_connect?'on':'off'}`;
+    await loadApps();
+  } catch (e) { toast(e.message, true); }
+}
+async function loadApps() {
+  state.apps = await api('GET', '/v1/admin/apps');
+  const box = $('#apps'); box.innerHTML = '';
+  if (!state.apps.length) box.innerHTML = '<div class="muted">No applications yet.</div>';
+  for (const a of state.apps) {
+    const b = document.createElement('button'); b.textContent = a.name; b.title = a.app_id;
+    b.className = state.app && state.app.app_id === a.app_id ? 'active' : '';
+    b.onclick = () => selectApp(a); box.appendChild(b);
+  }
+}
+async function selectApp(a) {
+  state.app = a; $('#detail').style.display = ''; $('#d_name').textContent = a.name; $('#d_appid').textContent = ' ' + a.app_id;
+  await loadApps(); await loadDetail();
+}
+async function loadDetail() {
+  const a = state.app; if (!a) return; const { p, c } = sel();
+  $('#d_sync').textContent = a.last_sync_at ? `Last sync ${fmt(a.last_sync_at)}${a.last_sync_error ? ' · ' + a.last_sync_error : ''}` : 'Never synced';
+  $('#d_sync').className = a.last_sync_error ? 'err' : 'muted';
+  const [rels, pol] = await Promise.all([
+    api('GET', `/v1/admin/apps/${a.app_id}/releases?platform=${p}&channel=${c}`),
+    api('GET', `/v1/admin/apps/${a.app_id}/policies/${p}/${c}`),
+  ]);
+  const tb = $('#releases'); tb.innerHTML = '';
+  if (!rels.length) tb.innerHTML = '<tr><td colspan="6" class="muted">No releases discovered. Sync from the store or add one manually.</td></tr>';
+  for (const r of rels) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.version}</td><td>${r.build ?? ''}</td><td><span class="badge ${r.status}">${r.status}</span></td><td>${r.source}</td><td>${fmt(r.published_at)}</td><td></td>`;
+    const del = document.createElement('button'); del.textContent = '✕'; del.title = 'Delete';
+    del.onclick = async () => { if (confirm(`Delete ${r.version} (${r.build ?? '-'})?`)) { await api('DELETE', `/v1/admin/apps/${a.app_id}/releases/${r.id}`); loadDetail(); } };
+    tr.lastElementChild.appendChild(del); tb.appendChild(tr);
+  }
+  fillPolicy(pol);
+  await Promise.all([loadPreview(), loadInstalls()]);
+}
+async function loadInstalls() {
+  const a = state.app; const { p, c } = sel();
+  const tb = $('#installs'); tb.innerHTML = '';
+  try {
+    const rows = await api('GET', `/v1/admin/apps/${a.app_id}/installs?platform=${p}&channel=${c}`);
+    if (!rows.length) tb.innerHTML = '<tr><td colspan="5" class="muted">No checks received yet on this platform/channel.</td></tr>';
+    for (const r of rows) {
+      const status = r.below_minimum ? '<span class="badge withdrawn">blocked</span>' : r.is_latest ? '<span class="badge published">latest</span>' : '<span class="badge rollout">outdated</span>';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${r.version}</td><td>${r.build ?? ''}</td><td>${r.checks}</td><td>${status}</td><td>${fmt(r.last_seen_at)}</td>`;
+      tb.appendChild(tr);
+    }
+  } catch (e) { tb.innerHTML = `<tr><td colspan="5" class="err">${e.message}</td></tr>`; }
+}
+function fillPolicy(pol) {
+  $('#f_enabled').checked = pol.enabled; document.querySelector(`input[name=mode][value=${pol.mode}]`).checked = true;
+  $('#f_custom_version').value = pol.custom_minimum_version || ''; $('#f_custom_build').value = pol.custom_minimum_build ?? '';
+  $('#f_age').value = pol.max_age_days ?? ''; $('#f_force').checked = pol.force_update;
+  $('#f_message').value = pol.update_message || ''; $('#f_url').value = pol.update_url || '';
+  $('#f_rec_version').value = pol.recommended_version || ''; $('#f_rec_build').value = pol.recommended_build ?? '';
+  $('#f_status').textContent = pol.is_default ? 'Using default (latest, forced)' : `Saved ${fmt(pol.updated_at)}`;
+  updateModeBoxes();
+}
+function updateModeBoxes() {
+  const m = document.querySelector('input[name=mode]:checked')?.value;
+  $('#f_custom_box').style.display = m === 'custom' ? '' : 'none'; $('#f_age_box').style.display = m === 'age_based' ? '' : 'none';
+}
+document.querySelectorAll('input[name=mode]').forEach(r => r.onchange = updateModeBoxes);
+async function loadPreview() {
+  const a = state.app; const { p, c } = sel();
+  try {
+    const pv = await api('GET', `/v1/admin/apps/${a.app_id}/preview/${p}/${c}`);
+    const v = x => x ? `${x.version}${x.build != null ? ' (' + x.build + ')' : ''}` : '–';
+    $('#p_latest').textContent = v(pv.latest); $('#p_minimum').textContent = v(pv.minimum); $('#p_recommended').textContent = v(pv.recommended);
+    $('#p_error').textContent = ''; $('#preview').textContent = JSON.stringify(pv, null, 2);
+  } catch (e) {
+    $('#p_latest').textContent = '–'; $('#p_minimum').textContent = '–'; $('#p_recommended').textContent = '–';
+    $('#p_error').textContent = e.message; $('#preview').textContent = e.message;
+  }
+}
+const num = v => v === '' ? null : Number(v);
+$('#save').onclick = async () => {
+  const a = state.app; const { p, c } = sel();
+  const body = {
+    enabled: $('#f_enabled').checked, mode: document.querySelector('input[name=mode]:checked').value,
+    custom_minimum_version: $('#f_custom_version').value || null, custom_minimum_build: num($('#f_custom_build').value),
+    max_age_days: num($('#f_age').value), force_update: $('#f_force').checked,
+    update_message: $('#f_message').value || null, update_url: $('#f_url').value || null,
+    recommended_version: $('#f_rec_version').value || null, recommended_build: num($('#f_rec_build').value),
+  };
+  try { fillPolicy(await api('PUT', `/v1/admin/apps/${a.app_id}/policies/${p}/${c}`, body)); toast('Policy saved'); loadPreview(); } catch (e) { toast(e.message, true); }
+};
+$('#reset').onclick = async () => { const a = state.app; const { p, c } = sel(); await api('DELETE', `/v1/admin/apps/${a.app_id}/policies/${p}/${c}`); toast('Policy reset'); loadDetail(); };
+$('#sync').onclick = async () => {
+  const a = state.app; $('#sync').disabled = true;
+  try { const res = await api('POST', `/v1/admin/releases/sync?app_id=${encodeURIComponent(a.app_id)}`); const errs = res.filter(r=>r.error); toast(errs.length ? errs[0].error : `Synced, ${res.reduce((n,r)=>n+r.discovered,0)} new`, !!errs.length); state.app = await api('GET', `/v1/admin/apps/${a.app_id}`); loadDetail(); }
+  catch (e) { toast(e.message, true); } finally { $('#sync').disabled = false; }
+};
+$('#refresh').onclick = async () => { state.app = await api('GET', `/v1/admin/apps/${state.app.app_id}`); loadDetail(); };
+$('#platform').onchange = loadDetail; $('#channel').onchange = loadDetail;
+$('#r_add').onclick = async () => {
+  const a = state.app; const { p, c } = sel();
+  try { await api('POST', `/v1/admin/apps/${a.app_id}/releases`, { platform: p, channel: c, version: $('#r_version').value, build: num($('#r_build').value), release_notes: $('#r_notes').value || null }); $('#r_version').value=''; $('#r_build').value=''; $('#r_notes').value=''; toast('Release added'); loadDetail(); }
+  catch (e) { toast(e.message, true); }
+};
+$('#n_create').onclick = async () => {
+  try {
+    const a = await api('POST', '/v1/admin/apps', { app_id: $('#n_app_id').value, name: $('#n_name').value, android_package_name: $('#n_android').value || null, ios_bundle_id: $('#n_bundle').value || null, apple_app_id: $('#n_apple').value || null });
+    toast('Application created'); selectApp(a);
+  } catch (e) { toast(e.message, true); }
+};
+$('#connect').onclick = connect;
+if (state.key) connect();
+</script>
+</body>
+</html>

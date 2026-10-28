@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vm
+      POSTGRES_PASSWORD: vm
+      POSTGRES_DB: vm
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vm"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+
+  migrate:
+    build: .
+    command: alembic upgrade head
+    env_file: .env
+    environment:
+      VM_DATABASE_URL: postgresql+asyncpg://vm:vm@db/vm
+    depends_on:
+      db: { condition: service_healthy }
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      VM_DATABASE_URL: postgresql+asyncpg://vm:vm@db/vm
+      VM_REDIS_URL: redis://redis:6379/0
+      VM_SYNC_INTERVAL_SECONDS: "0"   # the worker service polls the stores
+    ports: ["8000:8000"]
+    volumes: ["./secrets:/secrets:ro"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_started }
+
+  worker:
+    build: .
+    command: python -m app.workers.main
+    env_file: .env
+    environment:
+      VM_DATABASE_URL: postgresql+asyncpg://vm:vm@db/vm
+      VM_REDIS_URL: redis://redis:6379/0
+    volumes: ["./secrets:/secrets:ro"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_started }
+
+volumes:
+  pgdata:
